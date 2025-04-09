@@ -77,12 +77,12 @@ export const DashboardHeader = (props: {
       try {
         if (token.split('.').length === 3) {
           const parts = token.split('.');
-          const padding = '='.repeat((4 - parts[1].length % 4) % 4);
-          const payload = window.atob(parts[1] + padding);
-          console.log('令牌内容:', JSON.parse(payload));
+          const padding = '='.repeat((4 - (parts[1]?.length ?? 0) % 4) % 4);
+          const payload = window.atob((parts[1] ?? '') + padding);
+          console.log('Token content:', JSON.parse(payload));
         }
       } catch (e) {
-        console.log('令牌解析失败:', e);
+        console.log('Token parsing failed:', e);
       }
       
       // 发送同步请求

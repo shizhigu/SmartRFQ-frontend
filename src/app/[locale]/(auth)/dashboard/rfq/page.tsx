@@ -1,23 +1,21 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Separator } from "@/components/ui/separator";
 import { 
-  Loader2, FileText, Upload, Mail, FileUp, Send, Search, AlertCircle, RefreshCw, Download,
+  Loader2, FileText, Upload, Mail, FileUp, Search, AlertCircle, RefreshCw, Download,
   ChevronRight, MoreHorizontal, FilePlus, FileQuestion, ListFilter, SortAsc, UploadCloud
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Toaster } from "@/components/ui/toaster";
 import { format } from 'date-fns';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useAuth } from '@clerk/nextjs';
 import { useApiWithOrganization, API_BASE_URL, createRequestOptions } from '@/utils/api';
 
@@ -63,7 +61,6 @@ interface PaginatedResponse<T> {
 
 export default function RfqPage() {
   const { toast } = useToast();
-  const router = useRouter();
   const { getToken } = useAuth();
   const { organizationId } = useApiWithOrganization();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -340,7 +337,6 @@ export default function RfqPage() {
         throw new Error(errorData.detail || '邮件模板生成失败');
       }
       
-      const templateData = await templateResponse.json();
       
       // 在此处可以添加发送邮件的逻辑，例如打开发送邮件的对话框，
       // 显示生成的模板内容，并允许用户编辑后发送
