@@ -20,6 +20,7 @@ import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Logo } from '@/templates/Logo';
 import { getI18nPath } from '@/utils/Helpers';
+import { ProjectSelector } from '@/components/ProjectSelector';
 
 export const DashboardHeader = (props: {
   menu: {
@@ -223,6 +224,11 @@ export const DashboardHeader = (props: {
           }}
         />
 
+        {/* 项目选择器 */}
+        <div className="ml-3 max-sm:hidden">
+          <ProjectSelector />
+        </div>
+
         <nav className="ml-3 max-lg:hidden">
           <ul className="flex flex-row items-center gap-x-3 text-lg font-medium [&_a:hover]:opacity-100 [&_a]:opacity-75">
             {props.menu.map(item => (
@@ -246,7 +252,7 @@ export const DashboardHeader = (props: {
           </li>
 
           <li>
-            <Button
+            {/* <Button
               variant="outline"
               size="sm"
               onClick={handleSyncUser}
@@ -259,8 +265,8 @@ export const DashboardHeader = (props: {
                   同步中...
                 </>
               ) : '同步用户'}
-            </Button>
-            {process.env.NODE_ENV === 'development' && (
+            </Button> */}
+            {/* {process.env.NODE_ENV === 'development' && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -269,7 +275,7 @@ export const DashboardHeader = (props: {
               >
                 🔑
               </Button>
-            )}
+            )} */}
           </li>
 
           <li data-fade>

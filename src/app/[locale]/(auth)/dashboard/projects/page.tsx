@@ -15,6 +15,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Toaster } from "@/components/ui/toaster";
 import { format } from 'date-fns';
 import { useApiWithOrganization, API_BASE_URL, createRequestOptions } from '@/utils/api';
+import { useProject } from '@/contexts/ProjectContext';
+import { useRouter } from 'next/navigation';
 
 interface Project {
   id: string;
@@ -64,6 +66,19 @@ export default function ProjectsPage() {
   // Delete confirmation state
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+
+  // 获取全局项目ID
+  const { projectId } = useProject();
+  
+  // 处理全局项目选择的效果
+  useEffect(() => {
+    if (projectId) {
+      console.log('全局项目ID已更改:', projectId);
+      // 可以基于全局projectId做一些操作，比如自动选择这个项目
+      // 例如：自动导航到这个项目的详情页面
+      // router.push(`/dashboard/projects/${projectId}`);
+    }
+  }, [projectId]);
 
   useEffect(() => {
     fetchProjects();
