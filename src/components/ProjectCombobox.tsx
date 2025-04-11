@@ -42,7 +42,7 @@ export function ProjectCombobox({
   selectedProject,
   onSelect,
   className,
-  placeholder = "选择项目...",
+  placeholder = "Select Project...",
   disabled = false
 }: ProjectComboboxProps) {
   const [open, setOpen] = React.useState(false)
@@ -67,7 +67,7 @@ export function ProjectCombobox({
         <Command>
           <CommandInput placeholder="Search Project..." />
           <CommandList>
-            <CommandEmpty>没有找到项目</CommandEmpty>
+            <CommandEmpty>No projects found</CommandEmpty>
             <CommandGroup>
               {projects.map((project) => (
                 <CommandItem

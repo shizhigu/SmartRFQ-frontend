@@ -22,7 +22,17 @@ import {
   ChevronDown, 
   ChevronUp,
   Plus,
-  LineChart
+  LineChart,
+  ArrowUp,
+  ArrowDown,
+  Folder,
+  Wrench,
+  Users,
+  Upload,
+  FilePlus2,
+  Brain,
+  Search,
+  Calendar
 } from 'lucide-react';
 
 import { useApiWithOrganization, API_BASE_URL, createRequestOptions } from '@/utils/api';
@@ -36,6 +46,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/utils/Helpers";
 import { useProject } from '@/contexts/ProjectContext';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 // 数据类型定义
 interface EmailHistory {
@@ -56,14 +72,26 @@ interface Project {
   description: string | null;
   status: string;
   created_at: string;
+  parts_count?: number;
+  last_updated?: string;
 }
 
-// 添加仪表盘统计数据接口
+// 仪表盘统计数据接口
 interface DashboardStats {
   activeProjects: number;
-  monthlyEmails: number;
+  rfqItemsCount: number;
   supplierCount: number;
   pendingQuotes: number;
+  rfqConversationsCount: number;
+  recentActivities?: Array<{
+    id: string;
+    type: string;
+    title: string;
+    description: string;
+    created_at: string;
+    entity_type?: string;
+    entity_id?: string;
+  }>;
 }
 
 // 邮件项组件 - 用于显示单个邮件，支持内容展开/折叠
@@ -275,6 +303,101 @@ function ActivityItem({
   );
 }
 
+// 统计卡片组件
+function StatCard({
+  icon,
+  title,
+  value,
+  change,
+  loading
+}: {
+  icon: React.ReactNode;
+  title: string;
+  value: number;
+  change?: number;
+  loading: boolean;
+}) {
+  const isPositiveChange = change !== undefined && change > 0;
+  const isNegativeChange = change !== undefined && change < 0;
+  
+  return (
+    <Card className="h-full">
+      <CardContent className="p-6">
+        <div className="flex items-center justify-between">
+          <div className="rounded-full p-3 bg-primary/10 text-primary">
+            {icon}
+          </div>
+          {change !== undefined && (
+            <Badge variant={isPositiveChange ? "default" : isNegativeChange ? "destructive" : "secondary"} className="flex items-center gap-1">
+              {isPositiveChange ? <ArrowUp className="h-3 w-3" /> : isNegativeChange ? <ArrowDown className="h-3 w-3" /> : null}
+              {Math.abs(change)}%
+            </Badge>
+          )}
+        </div>
+        <div className="mt-4">
+          <p className="text-sm font-medium text-muted-foreground">{title}</p>
+          <div className="text-3xl font-bold mt-1">
+            {loading ? <Skeleton className="h-9 w-16" /> : value}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// 快速操作卡片组件
+function QuickActionCard({
+  icon,
+  title,
+  href,
+  onClick,
+  bgColor = "bg-primary/10",
+  iconColor = "text-primary"
+}: {
+  icon: React.ReactNode;
+  title: string;
+  href?: string;
+  onClick?: () => void;
+  bgColor?: string;
+  iconColor?: string;
+}) {
+  const content = (
+    <div className={`rounded-full p-4 ${bgColor} ${iconColor} mb-3`}>
+      {icon}
+    </div>
+  );
+
+  if (onClick) {
+    return (
+      <Card className="h-full hover:border-primary/50 transition-all duration-300">
+        <CardContent className="p-0">
+          <button 
+            onClick={onClick}
+            className="flex flex-col items-center justify-center p-6 h-full w-full text-center"
+          >
+            {content}
+            <h3 className="font-medium">{title}</h3>
+          </button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="h-full hover:border-primary/50 transition-all duration-300">
+      <CardContent className="p-0">
+        <Link 
+          href={href || '#'}
+          className="flex flex-col items-center justify-center p-6 h-full text-center"
+        >
+          {content}
+          <h3 className="font-medium">{title}</h3>
+        </Link>
+      </CardContent>
+    </Card>
+  );
+}
+
 // 主页组件
 const DashboardPage = () => {
   const t = useTranslations('DashboardIndex');
@@ -288,11 +411,22 @@ const DashboardPage = () => {
   const [recentProjects, setRecentProjects] = useState<Project[]>([]);
   const [dashboardStats, setDashboardStats] = useState<DashboardStats>({
     activeProjects: 0,
-    monthlyEmails: 0,
+    rfqItemsCount: 0,
     supplierCount: 0,
-    pendingQuotes: 0
+    pendingQuotes: 0,
+    rfqConversationsCount: 0,
+    recentActivities: []
   });
   const [activeTab, setActiveTab] = useState('all');
+  const [projectIdReady, setProjectIdReady] = useState(false);
+  
+  // 新增：创建项目的状态
+  const [createProjectDialogOpen, setCreateProjectDialogOpen] = useState(false);
+  const [newProjectForm, setNewProjectForm] = useState({
+    name: '',
+    description: '',
+    status: 'draft'
+  });
 
   // 获取认证令牌
   const getAuthToken = async () => {
@@ -308,153 +442,6 @@ const DashboardPage = () => {
     }
   };
 
-  // 获取最近邮件
-  const fetchRecentEmails = async (limit: number = 3) => {
-    try {
-      const token = await getAuthToken();
-      
-      // 如果没有选择项目，则获取所有邮件历史或先获取一个项目
-      if (!projectId) {
-        // 获取一个项目ID来获取邮件历史
-        const projectListResponse = await fetch(`${API_BASE_URL}/projects?page=1&page_size=1`, 
-          createRequestOptions('GET', token, null, organizationId)
-        );
-        
-        if (projectListResponse.ok) {
-          const projectData = await projectListResponse.json();
-          if (projectData.items && projectData.items.length > 0) {
-            const firstProjectId = projectData.items[0].id;
-            
-            // 使用获取到的项目ID请求邮件历史
-            const options = createRequestOptions('GET', token, null, organizationId);
-            const response = await fetch(`${API_BASE_URL}/projects/${firstProjectId}/history?limit=${limit}`, options);
-            
-            if (response.ok) {
-              const data = await response.json();
-              setRecentEmails(data);
-            }
-          } else {
-            // 没有项目，设置空数组
-            setRecentEmails([]);
-          }
-        }
-      } else {
-        // 使用已选项目ID
-        const options = createRequestOptions('GET', token, null, organizationId);
-        const response = await fetch(`${API_BASE_URL}/projects/${projectId}/history?limit=${limit}`, options);
-        
-        if (response.ok) {
-          const data = await response.json();
-          setRecentEmails(data);
-        }
-      }
-    } catch (error) {
-      console.error('获取最近邮件失败:', error);
-      toast({
-        title: "错误",
-        description: error instanceof Error ? error.message : '获取最近邮件失败',
-        variant: "destructive",
-      });
-    }
-  };
-
-  // 获取最近项目
-  const fetchRecentProjects = async () => {
-    try {
-      const token = await getAuthToken();
-      
-      const options = createRequestOptions('GET', token, null, organizationId);
-      const response = await fetch(`${API_BASE_URL}/projects?page=1&page_size=4`, options);
-      
-      if (!response.ok) {
-        throw new Error('获取项目列表失败');
-      }
-      
-      const data = await response.json();
-      setRecentProjects(data.items || []);
-    } catch (error) {
-      console.error('获取项目列表失败:', error);
-      toast({
-        title: "错误",
-        description: error instanceof Error ? error.message : '获取项目列表失败',
-        variant: "destructive",
-      });
-    }
-  };
-
-  // 获取仪表盘统计数据
-  const fetchDashboardStats = async () => {
-    try {
-      const token = await getAuthToken();
-      
-      // 创建请求选项
-      const options = createRequestOptions('GET', token, null, organizationId);
-      
-      // 获取活跃项目数量
-      const projectsResponse = await fetch(`${API_BASE_URL}/projects?page=1&page_size=1&status=open`, options);
-      let activeProjects = 0;
-      if (projectsResponse.ok) {
-        const projectsData = await projectsResponse.json();
-        activeProjects = projectsData.total || 0;
-      }
-      
-      // 获取本月邮件数量 - 使用现有项目的历史记录API
-      let monthlyEmails = 0;
-      if (activeProjects > 0) {
-        // 先获取一个项目ID
-        const projectListResponse = await fetch(`${API_BASE_URL}/projects?page=1&page_size=1`, options);
-        if (projectListResponse.ok) {
-          const projectData = await projectListResponse.json();
-          if (projectData.items && projectData.items.length > 0) {
-            const projectId = projectData.items[0].id;
-            
-            // 获取该项目的邮件历史，设置较大的limit以便准确统计
-            const emailHistoryResponse = await fetch(`${API_BASE_URL}/projects/${projectId}/history?limit=100`, options);
-            if (emailHistoryResponse.ok) {
-              const emailHistory = await emailHistoryResponse.json();
-              
-              // 计算本月邮件数量
-              const now = new Date();
-              const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-              monthlyEmails = emailHistory.filter((email: any) => {
-                return email.sent_at && new Date(email.sent_at) >= startOfMonth;
-              }).length;
-            }
-          }
-        }
-      }
-      
-      // 获取供应商数量
-      const suppliersResponse = await fetch(`${API_BASE_URL}/suppliers`, options);
-      let supplierCount = -1;
-      if (suppliersResponse.ok) {
-        const suppliersData = await suppliersResponse.json();
-        supplierCount = suppliersData.length || 0;
-      }
-      
-      // 获取待定报价数量 - 这里需要根据实际API调整
-      // 由于可能没有直接API，可以近似使用开放状态的会话数量
-      const conversationsResponse = await fetch(`${API_BASE_URL}/conversations?page=1&page_size=1&status=open`, options);
-      let pendingQuotes = 0;
-      if (conversationsResponse.ok) {
-        const conversationsData = await conversationsResponse.json();
-        pendingQuotes = conversationsData.total || 0;
-      }
-      
-      // 更新统计数据
-      setDashboardStats({
-        activeProjects,
-        monthlyEmails,
-        supplierCount,
-        pendingQuotes
-      });
-      
-    } catch (error) {
-      console.error('获取统计数据失败:', error);
-      // 这里不显示错误通知，保持用户体验流畅
-    }
-  };
-
   // 处理回复邮件
   const handleReplyEmail = (email: EmailHistory) => {
     // 在实际情况下，这里会导航到RFQ页面并打开邮件对话框
@@ -466,24 +453,194 @@ const DashboardPage = () => {
   };
 
   // 处理转发邮件
-  const handleForwardEmail = (email: EmailHistory) => {
-    // 在实际情况下，这里会导航到RFQ页面并打开邮件对话框
-    toast({
-      title: "转发邮件",
-      description: `正在转发邮件：${email.subject}`,
-    });
-    window.location.href = `/dashboard/rfq?action=forward&email=${email.id}`;
+  // const handleForwardEmail = (email: EmailHistory) => {
+  //   // 在实际情况下，这里会导航到RFQ页面并打开邮件对话框
+  //   toast({
+  //     title: "转发邮件",
+  //     description: `正在转发邮件：${email.subject}`,
+  //   });
+  //   window.location.href = `/dashboard/rfq?action=forward&email=${email.id}`;
+  // };
+
+  // 监听projectId的变化
+  useEffect(() => {
+    if (!projectIdReady && projectId !== null) {
+      setProjectIdReady(true);
+    }
+  }, [projectId, projectIdReady]);
+
+  // 新增：专门监听项目ID变化的钩子，当项目变化时重新加载统计数据
+  useEffect(() => {
+    if (projectId && organizationId) {
+      console.log('项目ID变化，重新加载仪表盘数据:', projectId);
+      
+      // 获取仪表盘统计数据
+      const fetchDashboardStats = async () => {
+        try {
+          setLoading(true);
+          const token = await getAuthToken();
+          
+          // 创建请求选项
+          const options = createRequestOptions('GET', token, null, organizationId);
+          
+          console.log('重新加载仪表盘数据，organizationId:', organizationId, 'projectId:', projectId);
+          
+          const summaryResponse = await fetch(
+            `${API_BASE_URL}/dashboard/summary/${organizationId}/${projectId}`, 
+            options
+          );
+          
+          if (summaryResponse.ok) {
+            const summaryData = await summaryResponse.json();
+            
+            // 获取待定报价数量
+            const conversationsResponse = await fetch(`${API_BASE_URL}/conversations?page=1&page_size=1&status=open`, options);
+            let pendingQuotes = 0;
+            if (conversationsResponse.ok) {
+              const conversationsData = await conversationsResponse.json();
+              pendingQuotes = conversationsData.total || 0;
+            }
+            
+            // 更新统计数据
+            setDashboardStats({
+              activeProjects: summaryData.activeProjects || 0,
+              rfqItemsCount: summaryData.rfqItemsCount || 0,
+              supplierCount: summaryData.supplierCount || 0,
+              pendingQuotes,
+              rfqConversationsCount: summaryData.rfqConversationsCount || 0,
+              recentActivities: summaryData.recentActivities || []
+            });
+          } else {
+            console.error('项目变更后获取仪表盘摘要数据失败:', summaryResponse.status);
+          }
+        } catch (error) {
+          console.error('项目变更后获取统计数据失败:', error);
+        } finally {
+          setLoading(false);
+        }
+      };
+      
+      fetchDashboardStats();
+      fetchRecentProjects();
+    }
+  }, [projectId, organizationId]); // 直接依赖projectId和organizationId
+
+  // 获取最近项目列表
+  const fetchRecentProjects = async () => {
+    try {
+      // 如果没有组织ID，则不能获取项目
+      if (!organizationId) {
+        return;
+      }
+      
+      const token = await getAuthToken();
+      const options = createRequestOptions('GET', token, null, organizationId);
+      
+      // 获取最近的项目，限制为5个
+      const response = await fetch(
+        `${API_BASE_URL}/projects?page=1&page_size=5&sort=-created_at`, 
+        options
+      );
+      
+      if (!response.ok) {
+        throw new Error('获取最近项目失败');
+      }
+      
+      const data = await response.json();
+      console.log('最近项目数据:', data);
+      
+      if (data && data.items) {
+        const projects = data.items;
+        
+        // 获取每个项目的零件数量
+        await Promise.all(projects.map(async (project: Project) => {
+          try {
+            // 请求该项目的RFQ零件数量
+            const rfqItemsResponse = await fetch(
+              `${API_BASE_URL}/projects/${project.id}/rfq-items?page=1&page_size=1`, 
+              options
+            );
+            
+            if (rfqItemsResponse.ok) {
+              const rfqItemsData = await rfqItemsResponse.json();
+              // 更新项目的零件数量字段
+              project.parts_count = rfqItemsData.length || 0;
+            } else {
+              console.error(`获取项目 ${project.id} 零件数量失败:`, rfqItemsResponse.status);
+            }
+          } catch (error) {
+            console.error(`获取项目 ${project.id} 零件数量失败:`, error);
+            project.parts_count = 0; // 设置默认值为0
+          }
+        }));
+        
+        // 更新状态
+        setRecentProjects(projects);
+      }
+    } catch (error) {
+      console.error('获取最近项目失败:', error);
+    }
   };
 
-  // 加载数据
+  // 加载数据 - 重新添加此钩子用于页面初始加载
   useEffect(() => {
+    // 获取仪表盘统计数据
+    const fetchDashboardStats = async () => {
+      try {
+        const token = await getAuthToken();
+        
+        // 创建请求选项
+        const options = createRequestOptions('GET', token, null, organizationId);
+
+        // 使用新的API端点获取仪表盘摘要数据
+        const targetProjectId = projectId || 'all';
+        if (!organizationId) {
+          return;
+        }
+        
+        console.log('初始加载仪表盘数据，organizationId:', organizationId, 'projectId:', targetProjectId);
+        
+        const summaryResponse = await fetch(
+          `${API_BASE_URL}/dashboard/summary/${organizationId}/${targetProjectId}`, 
+          options
+        );
+        
+        if (summaryResponse.ok) {
+          const summaryData = await summaryResponse.json();
+          
+          // 获取待定报价数量 - 这里需要根据实际API调整
+          // 由于可能没有直接API，可以近似使用开放状态的会话数量
+          const conversationsResponse = await fetch(`${API_BASE_URL}/conversations?page=1&page_size=1&status=open`, options);
+          let pendingQuotes = 0;
+          if (conversationsResponse.ok) {
+            const conversationsData = await conversationsResponse.json();
+            pendingQuotes = conversationsData.total || 0;
+          }
+          
+          // 更新统计数据
+          setDashboardStats({
+            activeProjects: summaryData.activeProjects || 0,
+            rfqItemsCount: summaryData.rfqItemsCount || 0,
+            supplierCount: summaryData.supplierCount || 0,
+            pendingQuotes,
+            rfqConversationsCount: summaryData.rfqConversationsCount || 0,
+            recentActivities: summaryData.recentActivities || []
+          });
+        } else {
+          console.error('获取仪表盘摘要数据失败:', summaryResponse.status);
+        }
+      } catch (error) {
+        console.error('获取统计数据失败:', error);
+        // 这里不显示错误通知，保持用户体验流畅
+      }
+    };
+
     const loadData = async () => {
       setLoading(true);
       try {
         await Promise.all([
-          fetchRecentEmails(3), // 显式传递参数，限制为5条邮件
           fetchRecentProjects(),
-          fetchDashboardStats() // 添加获取统计数据
+          fetchDashboardStats()
         ]);
       } catch (error) {
         console.error('加载数据失败:', error);
@@ -492,241 +649,387 @@ const DashboardPage = () => {
       }
     };
 
-    loadData();
-  }, []);
+    // 只有当organizationId存在时才加载数据
+    if (organizationId) {
+      loadData();
+    }
+  }, [organizationId, projectId, projectIdReady]); // 添加projectId作为依赖
+
+  // 新增：创建新项目的函数
+  const handleCreateProject = async () => {
+    try {
+      const token = await getAuthToken();
+      
+      if (!newProjectForm.name.trim()) {
+        toast({
+          title: "错误",
+          description: "项目名称不能为空",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      const options = createRequestOptions('POST', token, {
+        name: newProjectForm.name,
+        description: newProjectForm.description,
+        status: newProjectForm.status
+      }, organizationId);
+      
+      const response = await fetch(`${API_BASE_URL}/projects`, options);
+      
+      if (!response.ok) {
+        throw new Error('创建项目失败');
+      }
+      
+      const newProject = await response.json();
+      
+      // 更新项目列表
+      fetchRecentProjects();
+      
+      // 重置表单并关闭对话框
+      setNewProjectForm({
+        name: '',
+        description: '',
+        status: 'draft'
+      });
+      setCreateProjectDialogOpen(false);
+      
+      toast({
+        title: "成功",
+        description: "项目创建成功",
+      });
+    } catch (error) {
+      toast({
+        title: "错误",
+        description: error instanceof Error ? error.message : '创建项目失败',
+        variant: "destructive",
+      });
+    }
+  };
 
   return (
-    <div className="space-y-6">
-      <TitleBar
-        title={t('title_bar')}
-        description={t('title_bar_description')}
-      />
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* 主内容区域 */}
-        <div className="md:col-span-2 space-y-6">
-          {/* 邮件历史卡片 */}
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex justify-between items-center">
-                <CardTitle className="text-xl flex items-center">
-                  <Mail className="mr-2 h-5 w-5" />
-                  最近邮件
-                </CardTitle>
-                <Button variant="outline" size="sm" asChild>
-                  <Link href="/dashboard/rfq?tab=emails">
-                    查看全部
-                  </Link>
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="mb-4">
-                  <TabsTrigger value="all">全部</TabsTrigger>
-                  <TabsTrigger value="sent">已发送</TabsTrigger>
-                  <TabsTrigger value="fail">发送失败</TabsTrigger>
-                </TabsList>
-                
-                <TabsContent value="all" className="space-y-4">
-                  {loading ? (
-                    Array.from({ length: 3 }).map((_, i) => (
-                      <Card key={i} className="w-full">
-                        <CardHeader className="p-4">
-                          <div className="flex items-center justify-between">
-                            <Skeleton className="h-5 w-1/3" />
-                            <Skeleton className="h-4 w-1/6" />
-                          </div>
-                          <Skeleton className="h-4 w-2/3 mt-2" />
-                        </CardHeader>
-                        <CardContent className="px-4 pb-4">
-                          <Skeleton className="h-20 w-full" />
-                        </CardContent>
-                      </Card>
-                    ))
-                  ) : recentEmails.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-12 text-center">
-                      <Inbox className="h-12 w-12 text-muted-foreground mb-4" />
-                      <h3 className="text-lg font-medium">无邮件记录</h3>
-                      <p className="text-muted-foreground mt-1">
-                        您尚未发送过任何邮件
-                      </p>
-                      <Button className="mt-4" asChild>
-                        <Link href="/dashboard/rfq">
-                          <Send className="mr-2 h-4 w-4" /> 发送询价邮件
-                        </Link>
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {recentEmails.map((email) => (
-                        <EmailItem 
-                          key={email.id} 
-                          email={email} 
-                          onReply={handleReplyEmail}
-                          onForward={handleForwardEmail}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </TabsContent>
-                
-                <TabsContent value="sent" className="space-y-4">
-                  {loading ? (
-                    <Skeleton className="h-32 w-full" />
-                  ) : (
-                    <div className="space-y-4">
-                      {recentEmails
-                        .filter(email => email.status === 'sent')
-                        .map((email) => (
-                          <EmailItem 
-                            key={email.id} 
-                            email={email} 
-                            onReply={handleReplyEmail}
-                            onForward={handleForwardEmail}
-                          />
-                        ))}
-                    </div>
-                  )}
-                </TabsContent>
-                
-                <TabsContent value="fail" className="space-y-4">
-                  {loading ? (
-                    <Skeleton className="h-32 w-full" />
-                  ) : (
-                    <div className="space-y-4">
-                      {recentEmails
-                        .filter(email => email.status !== 'sent')
-                        .map((email) => (
-                          <EmailItem 
-                            key={email.id} 
-                            email={email} 
-                            onReply={handleReplyEmail}
-                            onForward={handleForwardEmail}
-                          />
-                        ))}
-                    </div>
-                  )}
-                </TabsContent>
-              </Tabs>
-            </CardContent>
-          </Card>
-          
+    <>
+      <div className="space-y-8">
+        {/* 1. 指标总览 */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard 
+            icon={<Folder className="h-6 w-6" />}
+            title="Projects"
+            value={dashboardStats.activeProjects}
+            change={12}
+            loading={loading}
+          />
+          <StatCard 
+            icon={<Wrench className="h-6 w-6" />}
+            title="RFQ Items"
+            value={dashboardStats.rfqItemsCount}
+            change={5}
+            loading={loading}
+          />
+          <StatCard 
+            icon={<Users className="h-6 w-6" />}
+            title="Suppliers"
+            value={dashboardStats.supplierCount}
+            change={-3}
+            loading={loading}
+          />
+          <StatCard 
+            icon={<Mail className="h-6 w-6" />}
+            title="RFQ Conversations"
+            value={dashboardStats.rfqConversationsCount}
+            loading={loading}
+          />
         </div>
 
-        {/* 侧边栏 */}
-        <div className="space-y-6">
-          {/* 活动摘要 */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-xl flex items-center">
-                <Clock className="mr-2 h-5 w-5" />
-                最近活动
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {loading ? (
-                <div className="space-y-4">
-                  {Array.from({ length: 5 }).map((_, i) => (
-                    <div key={i} className="flex items-start gap-4">
-                      <Skeleton className="h-10 w-10 rounded-full" />
-                      <div className="space-y-2 flex-1">
-                        <Skeleton className="h-4 w-1/2" />
-                        <Skeleton className="h-3 w-full" />
+        {/* 2. 快速入口 */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <QuickActionCard 
+            icon={<FilePlus2 className="h-5 w-5" />}
+            title="Create Project"
+            onClick={() => setCreateProjectDialogOpen(true)}
+            bgColor="bg-blue-100"
+            iconColor="text-blue-600"
+          />
+          <QuickActionCard 
+            icon={<Upload className="h-5 w-5" />}
+            title="上传RFQ"
+            href="/dashboard/rfq?tab=files"
+            bgColor="bg-green-100"
+            iconColor="text-green-600"
+          />
+          <QuickActionCard 
+            icon={<Brain className="h-5 w-5" />}
+            title="解析RFQ"
+            href="/dashboard/rfq?tab=files"
+            bgColor="bg-purple-100"
+            iconColor="text-purple-600"
+          />
+          <QuickActionCard 
+            icon={<Send className="h-5 w-5" />}
+            title="发送RFQ"
+            href="/dashboard/rfq?tab=emails"
+            bgColor="bg-amber-100"
+            iconColor="text-amber-600"
+          />
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* 3. 最近项目列表 */}
+          <div className="lg:col-span-2">
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex justify-between items-center">
+                  <CardTitle className="text-xl flex items-center">
+                    <Folder className="mr-2 h-5 w-5" />
+                    Recent Projects
+                  </CardTitle>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link href="/dashboard/projects">
+                      View All
+                    </Link>
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {loading ? (
+                  <div className="w-full">
+                    <Skeleton className="h-12 w-full mb-3" />
+                    <Skeleton className="h-12 w-full mb-3" />
+                    <Skeleton className="h-12 w-full mb-3" />
+                    <Skeleton className="h-12 w-full" />
+                  </div>
+                ) : recentProjects.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <Folder className="h-12 w-12 text-muted-foreground mb-4" />
+                    <h3 className="text-lg font-medium">No projects yet</h3>
+                    <p className="text-muted-foreground mt-1">
+                      You haven't created any projects yet
+                    </p>
+                    <Button className="mt-4" onClick={() => setCreateProjectDialogOpen(true)}>
+                      <Plus className="mr-2 h-4 w-4" /> Create Project
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Project Name</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Items Count</TableHead>
+                          <TableHead>Last Updated</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {recentProjects.map((project) => (
+                          <TableRow key={project.id}>
+                            <TableCell className="font-medium">{project.name}</TableCell>
+                            <TableCell>
+                              <Badge
+                                variant={
+                                  project.status === 'open' ? 'default' :
+                                  project.status === 'closed' ? 'destructive' :
+                                  project.status === 'archived' ? 'secondary' : 'outline'
+                                }
+                                className="text-xs"
+                              >
+                                {project.status === 'open' ? 'In Progress' :
+                                project.status === 'draft' ? 'Draft' :
+                                 project.status === 'closed' ? 'Closed' :
+                                 project.status === 'archived' ? 'Archived' : project.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>{project.parts_count}</TableCell>
+                            <TableCell>
+                              {project.last_updated 
+                                ? format(new Date(project.last_updated), 'yyyy-MM-dd')
+                                : format(new Date(project.created_at), 'yyyy-MM-dd')}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button variant="ghost" size="sm" asChild>
+                                <Link href={`/dashboard/projects/${project.id}`}>
+                                  <Search className="h-3.5 w-3.5 mr-1" />
+                                  View
+                                </Link>
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* 4. 最近动态 */}
+          <div>
+            <Card className="h-full">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-xl flex items-center">
+                  <Clock className="mr-2 h-5 w-5" />
+                  Recent Activities
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {loading ? (
+                  <div className="space-y-4">
+                    {Array.from({ length: 5 }).map((_, i) => (
+                      <div key={i} className="flex items-start gap-4">
+                        <Skeleton className="h-10 w-10 rounded-full" />
+                        <div className="space-y-2 flex-1">
+                          <Skeleton className="h-4 w-1/2" />
+                          <Skeleton className="h-3 w-full" />
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="divide-y">
-                  <ActivityItem 
-                    icon={<Mail className="h-4 w-4" />}
-                    title="发送了询价邮件"
-                    description="向供应商 ABC 发送了零件询价"
-                    time="今天 14:30"
-                    color="bg-blue-100 text-blue-500"
-                  />
-                  <ActivityItem 
-                    icon={<CheckCircle className="h-4 w-4" />}
-                    title="完成项目创建"
-                    description="创建了新项目 '2024年第二季度采购'"
-                    time="昨天"
-                    color="bg-green-100 text-green-500"
-                  />
-                  <ActivityItem 
-                    icon={<AlertCircle className="h-4 w-4" />}
-                    title="邮件发送失败"
-                    description="向 supplier@example.com 的邮件发送失败"
-                    time="2天前"
-                    color="bg-red-100 text-red-500"
-                  />
-                  <ActivityItem 
-                    icon={<Archive className="h-4 w-4" />}
-                    title="归档了项目"
-                    description="归档了 '2023年第四季度采购'"
-                    time="1周前"
-                    color="bg-yellow-100 text-yellow-600"
-                  />
-                  <ActivityItem 
-                    icon={<Star className="h-4 w-4" />}
-                    title="收到新的报价"
-                    description="供应商 XYZ 提交了新的报价"
-                    time="2周前"
-                    color="bg-purple-100 text-purple-500"
-                  />
-                </div>
-              )}
-            </CardContent>
-          </Card>
-          
-          {/* 简易统计卡片 */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xl flex items-center">
-                <LineChart className="mr-2 h-5 w-5" />
-                数据统计
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <div className="text-sm font-medium text-muted-foreground">活跃项目</div>
-                  <div className="text-2xl font-bold">
-                    {loading ? <Skeleton className="h-8 w-10" /> : dashboardStats.activeProjects}
+                    ))}
                   </div>
-                </div>
-                <div className="space-y-1">
-                  <div className="text-sm font-medium text-muted-foreground">本月邮件</div>
-                  <div className="text-2xl font-bold">
-                    {loading ? <Skeleton className="h-8 w-10" /> : dashboardStats.monthlyEmails}
+                ) : dashboardStats.recentActivities && dashboardStats.recentActivities.length > 0 ? (
+                  <div className="divide-y">
+                    {dashboardStats.recentActivities.map((activity) => {
+                      // 根据活动类型确定要显示的图标和颜色
+                      let icon = <Clock className="h-4 w-4" />;
+                      let color = "bg-muted text-muted-foreground";
+                      
+                      if (activity.type === 'upload') {
+                        icon = <Upload className="h-4 w-4" />;
+                        color = "bg-blue-100 text-blue-500";
+                      } else if (activity.type === 'email' || activity.type === 'conversation') {
+                        icon = <Mail className="h-4 w-4" />;
+                        color = "bg-green-100 text-green-500";
+                      } else if (activity.type === 'parse') {
+                        icon = <Wrench className="h-4 w-4" />;
+                        color = "bg-purple-100 text-purple-500";
+                      } else if (activity.type === 'project_create') {
+                        icon = <CheckCircle className="h-4 w-4" />;
+                        color = "bg-green-100 text-green-500";
+                      } else if (activity.type === 'email_failure' || activity.type === 'error') {
+                        icon = <AlertCircle className="h-4 w-4" />;
+                        color = "bg-red-100 text-red-500";
+                      } else if (activity.type === 'archive') {
+                        icon = <Archive className="h-4 w-4" />;
+                        color = "bg-yellow-100 text-yellow-600";
+                      } else if (activity.type === 'quote' || activity.type === 'quote_received') {
+                        icon = <Star className="h-4 w-4" />;
+                        color = "bg-purple-100 text-purple-500";
+                      }
+                      
+                      // 计算多久以前的活动
+                      const activityTime = new Date(activity.created_at);
+                      const now = new Date();
+                      const diffInMs = now.getTime() - activityTime.getTime();
+                      const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
+                      const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
+                      const diffInMinutes = Math.floor(diffInMs / (1000 * 60));
+                      
+                      let timeText;
+                      if (diffInDays > 7) {
+                        timeText = `${Math.floor(diffInDays / 7)}周前`;
+                      } else if (diffInDays > 0) {
+                        timeText = `${diffInDays}天前`;
+                      } else if (diffInHours > 0) {
+                        timeText = `${diffInHours}小时前`;
+                      } else if (diffInMinutes > 0) {
+                        timeText = `${diffInMinutes}分钟前`;
+                      } else {
+                        timeText = "刚刚";
+                      }
+                      
+                      return (
+                        <ActivityItem 
+                          key={activity.id}
+                          icon={icon}
+                          title={activity.title}
+                          description={activity.description}
+                          time={timeText}
+                          color={color}
+                        />
+                      );
+                    })}
                   </div>
-                </div>
-                <div className="space-y-1">
-                  <div className="text-sm font-medium text-muted-foreground">供应商</div>
-                  <div className="text-2xl font-bold">
-                    {loading ? <Skeleton className="h-8 w-10" /> : dashboardStats.supplierCount}
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <Clock className="h-12 w-12 text-muted-foreground mb-4" />
+                    <h3 className="text-lg font-medium">暂无活动记录</h3>
+                    <p className="text-muted-foreground mt-1">
+                      系统还未记录到任何活动
+                    </p>
+                    <Button className="mt-4" asChild>
+                      <Link href="/dashboard/rfq">
+                        <Mail className="mr-2 h-4 w-4" /> 创建RFQ询价
+                      </Link>
+                    </Button>
                   </div>
-                </div>
-                <div className="space-y-1">
-                  <div className="text-sm font-medium text-muted-foreground">待定报价</div>
-                  <div className="text-2xl font-bold">
-                    {loading ? <Skeleton className="h-8 w-10" /> : dashboardStats.pendingQuotes}
-                  </div>
-                </div>
-              </div>
-              
-              <div className="mt-4">
-                <Button variant="outline" size="sm" className="w-full" asChild>
-                  <Link href="/dashboard/rfq">
-                    查看询价管理
-                  </Link>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </div>
-    </div>
+
+      {/* 创建项目对话框 */}
+      <Dialog open={createProjectDialogOpen} onOpenChange={setCreateProjectDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>创建新项目</DialogTitle>
+            <DialogDescription>
+              填写以下信息创建一个新项目
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="name">项目名称</Label>
+              <Input
+                id="name"
+                placeholder="请输入项目名称"
+                value={newProjectForm.name}
+                onChange={(e) => setNewProjectForm(prev => ({ ...prev, name: e.target.value }))}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="description">项目描述</Label>
+              <Textarea
+                id="description"
+                placeholder="请输入项目描述"
+                value={newProjectForm.description}
+                onChange={(e) => setNewProjectForm(prev => ({ ...prev, description: e.target.value }))}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="status">项目状态</Label>
+              <Select 
+                value={newProjectForm.status}
+                onValueChange={(value) => setNewProjectForm(prev => ({ ...prev, status: value }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="选择状态" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="draft">草稿</SelectItem>
+                  <SelectItem value="open">进行中</SelectItem>
+                  <SelectItem value="closed">已关闭</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setCreateProjectDialogOpen(false);
+              setNewProjectForm({
+                name: '',
+                description: '',
+                status: 'draft'
+              });
+            }}>
+              取消
+            </Button>
+            <Button onClick={handleCreateProject}>创建项目</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 };
 

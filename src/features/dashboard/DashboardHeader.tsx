@@ -16,11 +16,13 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Separator } from '@/components/ui/separator';
 import { Button } from '@/components/ui/button';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Bell, Settings, User, Search, ChevronDown } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Logo } from '@/templates/Logo';
 import { getI18nPath } from '@/utils/Helpers';
 import { ProjectSelector } from '@/components/ProjectSelector';
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 
 export const DashboardHeader = (props: {
   menu: {
@@ -33,6 +35,14 @@ export const DashboardHeader = (props: {
   const { organization } = useOrganization();
   const { toast } = useToast();
   const [isSyncing, setIsSyncing] = useState(false);
+  
+  // 检查菜单项是否处于活动状态的函数
+  const isActiveMenu = (href: string) => {
+    if (typeof window !== 'undefined') {
+      return window.location.pathname.startsWith(href);
+    }
+    return false;
+  };
 
   const handleSyncUser = async () => {
     setIsSyncing(true);
@@ -189,24 +199,33 @@ export const DashboardHeader = (props: {
   };
 
   return (
-    <>
+    <div className="flex items-center justify-between w-full h-16 px-4 border-b bg-background sticky top-0 z-50">
       <div className="flex items-center">
-        <Link href="/dashboard" className="max-sm:hidden">
-          <Logo />
+        {/* Logo */}
+        <Link href="/dashboard" className="mr-8 flex items-center">
+          <span className="text-lg font-bold text-primary">Xinra</span>
         </Link>
 
-        <svg
-          className="size-8 stroke-muted-foreground max-sm:hidden"
-          xmlns="http://www.w3.org/2000/svg"
-          viewBox="0 0 24 24"
-          fill="none"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path stroke="none" d="M0 0h24v24H0z" />
-          <path d="M17 5 7 19" />
-        </svg>
+        {/* 主导航 */}
+        <nav className="hidden md:flex items-center space-x-2">
+          {props.menu.map(item => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                isActiveMenu(item.href)
+                  ? 'bg-primary/10 text-primary'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+              }`}
+            >
+              {item.label}
+            </Link>
+          ))}
+        </nav>
+      </div>
 
+      <div className="flex items-center gap-3">
+        {/* 组织选择器 */}
         <OrganizationSwitcher
           organizationProfileMode="navigation"
           organizationProfileUrl={getI18nPath(
@@ -218,106 +237,108 @@ export const DashboardHeader = (props: {
           skipInvitationScreen
           appearance={{
             elements: {
-              organizationSwitcherTrigger: 'max-w-28 sm:max-w-52 h-10 rounded-md border bg-background p-1 text-sm',
-              rootBox: 'ml-3 max-w-40 sm:max-w-64',
+              organizationSwitcherTrigger: 'h-9 rounded-md border bg-background px-3 text-sm',
+              rootBox: 'max-w-40 sm:max-w-64',
             },
           }}
         />
 
         {/* 项目选择器 */}
-        <div className="ml-3 max-sm:hidden">
+        <div className="hidden sm:flex">
           <ProjectSelector />
         </div>
 
-        <nav className="ml-3 max-lg:hidden">
-          <ul className="flex flex-row items-center gap-x-3 text-lg font-medium [&_a:hover]:opacity-100 [&_a]:opacity-75">
-            {props.menu.map(item => (
-              <li key={item.href}>
-                <ActiveLink href={item.href}>{item.label}</ActiveLink>
-              </li>
-            ))}
-          </ul>
-        </nav>
-      </div>
-
-      <div>
-        <ul className="flex items-center gap-x-1.5 [&_li[data-fade]:hover]:opacity-100 [&_li[data-fade]]:opacity-60">
-          {/* 显示当前组织 */}
-          <li className="mr-2">
-            {organization && (
-              <span className="text-sm px-2 py-1 rounded bg-muted">
-                {organization.name || "组织"}
-              </span>
-            )}
-          </li>
-
-          <li>
-            {/* <Button
-              variant="outline"
-              size="sm"
-              onClick={handleSyncUser}
-              disabled={isSyncing}
-              className="mr-1"
-            >
-              {isSyncing ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  同步中...
-                </>
-              ) : '同步用户'}
-            </Button> */}
-            {/* {process.env.NODE_ENV === 'development' && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={checkToken}
-                title="调试认证令牌"
-              >
-                🔑
+        {/* 通知铃铛 */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="icon" className="relative">
+              <Bell className="h-4 w-4" />
+              <Badge className="absolute -top-1 -right-1 h-4 w-4 p-0 flex items-center justify-center text-[10px]">
+                3
+              </Badge>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-80">
+            <div className="flex justify-between items-center px-4 py-2 border-b">
+              <h2 className="font-semibold">通知</h2>
+              <Button variant="ghost" size="sm">
+                全部标为已读
               </Button>
-            )} */}
-          </li>
-
-          <li data-fade>
-            <div className="lg:hidden">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <ToggleMenuButton />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent>
-                  {props.menu.map(item => (
-                    <DropdownMenuItem key={item.href} asChild>
-                      <Link href={item.href}>{item.label}</Link>
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
             </div>
-          </li>
+            <div className="py-2 max-h-[300px] overflow-auto">
+              <div className="px-4 py-2 hover:bg-muted cursor-pointer">
+                <div className="flex gap-2">
+                  <div className="flex-shrink-0 h-8 w-8 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center">
+                    <Bell className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">新的询价回复</p>
+                    <p className="text-xs text-muted-foreground">供应商XYZ已回复您的询价</p>
+                    <p className="text-xs text-muted-foreground mt-1">10分钟前</p>
+                  </div>
+                </div>
+              </div>
+              <div className="px-4 py-2 hover:bg-muted cursor-pointer">
+                <div className="flex gap-2">
+                  <div className="flex-shrink-0 h-8 w-8 bg-green-100 text-green-600 rounded-full flex items-center justify-center">
+                    <Bell className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">文档解析完成</p>
+                    <p className="text-xs text-muted-foreground">您上传的文档已成功解析</p>
+                    <p className="text-xs text-muted-foreground mt-1">1小时前</p>
+                  </div>
+                </div>
+              </div>
+              <div className="px-4 py-2 hover:bg-muted cursor-pointer">
+                <div className="flex gap-2">
+                  <div className="flex-shrink-0 h-8 w-8 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center">
+                    <Bell className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">系统更新</p>
+                    <p className="text-xs text-muted-foreground">系统已更新至最新版本</p>
+                    <p className="text-xs text-muted-foreground mt-1">1天前</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="px-4 py-2 border-t">
+              <Button variant="outline" size="sm" className="w-full">
+                查看所有通知
+              </Button>
+            </div>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
-          {/* PRO: Dark mode toggle button */}
+        {/* 用户按钮 */}
+        <UserButton
+          userProfileMode="navigation"
+          userProfileUrl="/dashboard/user-profile"
+          appearance={{
+            elements: {
+              userButtonBox: 'h-9',
+              userButtonTrigger: 'h-9 w-9',
+            },
+          }}
+        />
 
-          <li data-fade>
-            <LocaleSwitcher />
-          </li>
-
-          <li>
-            <Separator orientation="vertical" className="h-4" />
-          </li>
-
-          <li>
-            <UserButton
-              userProfileMode="navigation"
-              userProfileUrl="/dashboard/user-profile"
-              appearance={{
-                elements: {
-                  rootBox: 'px-2 py-1.5',
-                },
-              }}
-            />
-          </li>
-        </ul>
+        {/* 移动端菜单 */}
+        <div className="md:hidden">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <ToggleMenuButton />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {props.menu.map(item => (
+                <DropdownMenuItem key={item.href} asChild>
+                  <Link href={item.href}>{item.label}</Link>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
-    </>
+    </div>
   );
 };

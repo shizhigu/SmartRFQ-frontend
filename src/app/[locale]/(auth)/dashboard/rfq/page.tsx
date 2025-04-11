@@ -15,6 +15,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import {
   AlertDialog,
@@ -30,7 +31,36 @@ import {
 import { 
   Loader2, FileText, Upload, Mail, FileUp, Search, AlertCircle, RefreshCw, Download,
   ChevronRight, MoreHorizontal, FilePlus, FileQuestion, ListFilter, SortAsc, UploadCloud,
-  Trash2, Edit, Check, X, Users, Archive, ChevronDown, ChevronUp, Reply, Forward
+  Trash2, Edit, Check, X, Users, Archive, ChevronDown, ChevronUp, Reply, Forward,
+  Filter,
+  PlusCircle,
+  Trash,
+  CheckSquare,
+  Square,
+  ChevronLeft,
+  // ChevronRight,
+  Clock,
+  Inbox,
+  Send,
+  Star,
+  LineChart,
+  ArrowUp,
+  ArrowDown,
+  Folder,
+  Wrench,
+  CheckCircle,
+  Plus,
+  Calendar,
+  FilePlus2,
+  Brain,
+  // FileQuestion,
+  // UploadCloud,
+  // Download,
+  // X,
+  // Trash2,
+  // RefreshCw,
+  // Edit,
+  // FilePlus
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Toaster } from "@/components/ui/toaster";
@@ -52,9 +82,11 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { useProject } from '@/contexts/ProjectContext';
+import { useTranslations } from 'next-intl';
+import { Pencil } from "lucide-react";
 
 // 数据类型定义
 interface Project extends ProjectType {}
@@ -80,6 +112,11 @@ interface RfqItem {
   process: string | null;
   delivery_time: string | null;
   created_at: string;
+  unit: string | null;
+  tolerance: string | null;
+  drawing_url: string | null;
+  surface_finish: string | null;
+  remarks: string | null;
 }
 
 interface PaginatedResponse<T> {
@@ -268,13 +305,357 @@ function EmailItem({
   );
 }
 
+// 编辑零件对话框组件
+function PartEditDialog({ 
+  open, 
+  onOpenChange, 
+  item, 
+  onSave, 
+  isSaving
+}: { 
+  open: boolean; 
+  onOpenChange: (open: boolean) => void; 
+  item: RfqItem | null;
+  onSave: (updatedItem: RfqItem) => Promise<void>;
+  isSaving: boolean;
+}) {
+  const [localItem, setLocalItem] = useState<RfqItem | null>(null);
+  // 使用不同名称的状态，避免与props重名
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  // 添加确认弹窗状态
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+  // 保存原始项目数据，用于比较变更
+  const [originalItem, setOriginalItem] = useState<RfqItem | null>(null);
+  // 存储修改的字段及其变更内容
+  const [changedFields, setChangedFields] = useState<{field: string, oldValue: any, newValue: any}[]>([]);
+  // 添加toast通知
+  const { toast } = useToast();
+
+  // 当item改变时更新本地状态和原始数据
+  useEffect(() => {
+    if (item) {
+      setLocalItem({...item});
+      setOriginalItem({...item});
+    }
+  }, [item]);
+
+  // 查找变更的字段
+  const findChanges = () => {
+    if (!originalItem || !localItem) return [];
+    
+    const changes: {field: string, oldValue: any, newValue: any}[] = [];
+    const fieldLabels: Record<keyof RfqItem, string> = {
+      id: 'ID',
+      project_id: '项目ID',
+      index_no: '序号',
+      part_number: '零件编号',
+      name: '零件名称',
+      quantity: '数量',
+      material: '材料',
+      size: '尺寸',
+      process: '工艺',
+      delivery_time: '交期',
+      created_at: '创建时间',
+      unit: '单位',
+      tolerance: '公差',
+      drawing_url: '图号',
+      surface_finish: '表面处理',
+      remarks: '备注'
+    };
+    
+    // 检查每个字段是否有变化
+    for (const key in originalItem) {
+      if (key === 'id' || key === 'project_id' || key === 'created_at') continue;
+      
+      const typedKey = key as keyof RfqItem;
+      // 如果值不同，添加到变更列表
+      if (originalItem[typedKey] !== localItem[typedKey]) {
+        changes.push({
+          field: fieldLabels[typedKey] || key,
+          oldValue: originalItem[typedKey] === null ? '无' : originalItem[typedKey],
+          newValue: localItem[typedKey] === null ? '无' : localItem[typedKey]
+        });
+      }
+    }
+    
+    return changes;
+  };
+
+  // 处理表单字段变化
+  const handleChange = (field: keyof RfqItem, value: string | number | null) => {
+    if (localItem) {
+      setLocalItem({
+        ...localItem,
+        [field]: value
+      });
+    }
+  };
+
+  // 处理保存操作 - 显示确认弹窗
+  const handleSave = async () => {
+    if (!localItem) return;
+    
+    // 找出修改的字段
+    const changes = findChanges();
+    
+    // 如果没有变更，直接关闭
+    if (changes.length === 0) {
+      toast({
+        description: "没有检测到任何修改",
+      });
+      return;
+    }
+    
+    // 保存变更记录并打开确认弹窗
+    setChangedFields(changes);
+    setConfirmDialogOpen(true);
+  };
+  
+  // 确认修改并提交
+  const confirmChanges = async () => {
+    if (!localItem) return;
+    
+    try {
+      setIsSubmitting(true);
+      await onSave(localItem);
+      setConfirmDialogOpen(false);
+    } catch (error) {
+      console.error('保存时出错:', error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // 处理关闭操作
+  const handleClose = () => {
+    onOpenChange(false);
+  };
+
+  // 如果没有项目数据，返回null
+  if (!localItem) return null;
+
+  return (
+    <>
+      <Dialog 
+        open={open} 
+        onOpenChange={(open) => {
+          if (!open) {
+            // 关闭时重置状态
+            setIsSubmitting(false);
+            setConfirmDialogOpen(false);
+          }
+          onOpenChange(open);
+        }}
+      >
+        <DialogContent className="max-w-4xl w-[95vw] max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader className="shrink-0">
+            <DialogTitle>编辑零件信息</DialogTitle>
+            <DialogDescription>
+              修改下方表单以更新零件详情
+            </DialogDescription>
+          </DialogHeader>
+          
+          {/* 使用滚动区域包装表单内容 */}
+          <div className="overflow-y-auto py-2 px-1 flex-grow">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit_index_no">序号</Label>
+                <Input
+                  id="edit_index_no"
+                  value={localItem.index_no?.toString() || ''}
+                  onChange={(e) => handleChange('index_no', e.target.value ? parseInt(e.target.value) : null)}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="edit_part_number">零件编号</Label>
+                <Input
+                  id="edit_part_number"
+                  value={localItem.part_number || ''}
+                  onChange={(e) => handleChange('part_number', e.target.value || null)}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="edit_name">零件名称</Label>
+                <Input
+                  id="edit_name"
+                  value={localItem.name || ''}
+                  onChange={(e) => handleChange('name', e.target.value || null)}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="edit_quantity">数量</Label>
+                <Input
+                  id="edit_quantity"
+                  value={localItem.quantity || ''}
+                  onChange={(e) => handleChange('quantity', e.target.value || null)}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="edit_material">材料</Label>
+                <Input
+                  id="edit_material"
+                  value={localItem.material || ''}
+                  onChange={(e) => handleChange('material', e.target.value || null)}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="edit_size">尺寸</Label>
+                <Input
+                  id="edit_size"
+                  value={localItem.size || ''}
+                  onChange={(e) => handleChange('size', e.target.value || null)}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="edit_process">工艺</Label>
+                <Input
+                  id="edit_process"
+                  value={localItem.process || ''}
+                  onChange={(e) => handleChange('process', e.target.value || null)}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="edit_delivery_time">交期</Label>
+                <Input
+                  id="edit_delivery_time"
+                  value={localItem.delivery_time || ''}
+                  onChange={(e) => handleChange('delivery_time', e.target.value || null)}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="edit_unit">单位</Label>
+                <Input
+                  id="edit_unit"
+                  value={localItem.unit || ''}
+                  onChange={(e) => handleChange('unit', e.target.value || null)}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="edit_tolerance">公差</Label>
+                <Input
+                  id="edit_tolerance"
+                  value={localItem.tolerance || ''}
+                  onChange={(e) => handleChange('tolerance', e.target.value || null)}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="edit_drawing_url">图号</Label>
+                <Input
+                  id="edit_drawing_url"
+                  value={localItem.drawing_url || ''}
+                  onChange={(e) => handleChange('drawing_url', e.target.value || null)}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="edit_surface_finish">表面处理</Label>
+                <Input
+                  id="edit_surface_finish"
+                  value={localItem.surface_finish || ''}
+                  onChange={(e) => handleChange('surface_finish', e.target.value || null)}
+                />
+              </div>
+              
+              <div className="space-y-2 col-span-1 md:col-span-2">
+                <Label htmlFor="edit_remarks">备注</Label>
+                <Textarea
+                  id="edit_remarks"
+                  value={localItem.remarks || ''}
+                  onChange={(e) => handleChange('remarks', e.target.value || null)}
+                  rows={3}
+                />
+              </div>
+            </div>
+          </div>
+          
+          <DialogFooter className="shrink-0 mt-4 pt-2 border-t">
+            <Button 
+              variant="outline" 
+              onClick={handleClose}
+              type="button"
+            >
+              取消
+            </Button>
+            <Button 
+              onClick={handleSave}
+              disabled={isSaving || isSubmitting}
+              type="button"
+            >
+              {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* 确认变更弹窗 */}
+      <AlertDialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认修改</AlertDialogTitle>
+            <AlertDialogDescription>
+              请确认以下字段的修改：
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          
+          <div className="max-h-[50vh] overflow-y-auto my-4 border rounded-md">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>字段</TableHead>
+                  <TableHead>原值</TableHead>
+                  <TableHead>新值</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {changedFields.map((change, index) => (
+                  <TableRow key={index}>
+                    <TableCell className="font-medium">{change.field}</TableCell>
+                    <TableCell className="text-muted-foreground">{change.oldValue}</TableCell>
+                    <TableCell className="font-semibold">{change.newValue}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={confirmChanges}
+              disabled={isSubmitting}
+            >
+              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              确认修改
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
+
 export default function RfqPage() {
   const { toast } = useToast();
   const { getToken } = useAuth();
   const { organizationId } = useApiWithOrganization();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
-
+  const searchParams = useSearchParams();
+  
+  // 修改这一行，使用已有的国际化键或者移除它
+  // const t = useTranslations('RfqPage');
+  
   // 状态管理
   const [isLoading, setIsLoading] = useState(true);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -288,7 +669,14 @@ export default function RfqPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [parsing, setParsing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [currentTab, setCurrentTab] = useState("projects");
+  const [currentTab, setCurrentTab] = useState(() => {
+    // 从URL参数获取初始标签页
+    const tab = searchParams.get('tab');
+    if (tab && ['projects', 'files', 'items', 'emails'].includes(tab)) {
+      return tab;
+    }
+    return "projects";
+  });
   const [pagination, setPagination] = useState({
     page: 1,
     page_size: 10,
@@ -333,6 +721,28 @@ export default function RfqPage() {
   const [supplierDialogOpen, setSupplierDialogOpen] = useState(false);
   const [templateGenerating, setTemplateGenerating] = useState(false);
 
+  // 添加新的状态
+  const [projectSearchTerm, setProjectSearchTerm] = useState('');
+  const [projectFilterStatus, setProjectFilterStatus] = useState<string | null>(null);
+  const [createProjectDialogOpen, setCreateProjectDialogOpen] = useState(false);
+  const [newProjectForm, setNewProjectForm] = useState({
+    name: '',
+    description: '',
+    status: 'draft'
+  });
+  const [projectsSelected, setProjectsSelected] = useState<string[]>([]);
+  const [allProjectsSelected, setAllProjectsSelected] = useState(false);
+  const [showProjectDeleteDialog, setShowProjectDeleteDialog] = useState(false);
+  
+  // 添加编辑状态
+  const [editingItem, setEditingItem] = useState<string | null>(null);
+  const [editFormData, setEditFormData] = useState<Partial<RfqItem>>({});
+  const [isUpdating, setIsUpdating] = useState(false);
+  
+  // 添加编辑弹窗状态
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [itemToEdit, setItemToEdit] = useState<RfqItem | null>(null);
+  
   // 初始加载数据
   useEffect(() => {
     fetchProjects();
@@ -483,7 +893,7 @@ export default function RfqPage() {
     if (!projectId || !selectedProject || !selectedFile) {
       toast({
         title: "Error",
-        description: "请先选择项目和文件",
+        description: "Please select a project and file first",
         variant: "destructive",
       });
       return;
@@ -515,7 +925,7 @@ export default function RfqPage() {
       }
       
       // 发送请求
-      const response = await fetch(`${API_BASE_URL}/projects/${projectId}/rfq-files/upload`, requestOptions);
+      const response = await fetch(`${API_BASE_URL}/projects/${projectId}/upload-rfq`, requestOptions);
       
       if (!response.ok) {
         const errorData = await response.json();
@@ -562,7 +972,7 @@ export default function RfqPage() {
     if (!projectId || !selectedProject) {
       toast({
         title: "Error",
-        description: "请先选择项目",
+        description: "Please select a project first",
         variant: "destructive",
       });
       return;
@@ -572,10 +982,11 @@ export default function RfqPage() {
     try {
       const token = await getAuthToken();
       
-      const options = createRequestOptions('POST', token, null, organizationId);
+      // 修改：将文件ID添加到请求体中
+      const options = createRequestOptions('POST', token, { file_id: fileId }, organizationId);
       
       // 发送解析请求
-      const response = await fetch(`${API_BASE_URL}/projects/${projectId}/rfq-files/${fileId}/parse`, options);
+      const response = await fetch(`${API_BASE_URL}/projects/${projectId}/parse-rfq`, options);
       
       if (!response.ok) {
         const errorData = await response.json();
@@ -585,8 +996,8 @@ export default function RfqPage() {
       const data = await response.json();
       
       toast({
-        title: "Parse successful",
-        description: `Successfully parsed ${data.items.length} parts`,
+        title: "解析成功",
+        description: `成功解析 ${data.items.length} 个零件`,
         variant: "default",
       });
       
@@ -596,8 +1007,8 @@ export default function RfqPage() {
       
     } catch (error) {
       toast({
-        title: "Parse failed",
-        description: error instanceof Error ? error.message : 'An error occurred during RFQ parsing',
+        title: "解析失败",
+        description: error instanceof Error ? error.message : 'RFQ解析过程中发生错误',
         variant: "destructive",
       });
     } finally {
@@ -610,7 +1021,7 @@ export default function RfqPage() {
     if (!projectId || !selectedProject) {
       toast({
         title: "Error",
-        description: "请先选择项目",
+        description: "Please select a project first",
         variant: "destructive",
       });
       return;
@@ -626,7 +1037,7 @@ export default function RfqPage() {
       if (suppliers.length === 0) {
         toast({
           title: "Error",
-          description: "没有可用的供应商。请先添加供应商。",
+          description: "No suppliers available. Please add suppliers first.",
           variant: "destructive",
         });
         return;
@@ -648,7 +1059,7 @@ export default function RfqPage() {
     if (!projectId || !selectedProject || selectedItems.length === 0) {
       toast({
         title: "Error",
-        description: "请先选择项目和零件",
+        description: "Please select a project and parts first",
         variant: "destructive",
       });
       return;
@@ -667,7 +1078,7 @@ export default function RfqPage() {
         // 显示更详细的错误信息，便于调试
         toast({
           title: "供应商列表为空",
-          description: "系统未能加载到任何供应商。请确认您已添加供应商，并检查浏览器控制台以获取更多错误信息。",
+          description: "System failed to load any suppliers. Please confirm that you have added suppliers and check the browser console for more error information.",
           variant: "destructive",
         });
         return;
@@ -691,7 +1102,7 @@ export default function RfqPage() {
     if (!projectId || !selectedProject) {
       toast({
         title: "Error",
-        description: "请先选择项目",
+        description: "Please select a project first",
         variant: "destructive",
       });
       return;
@@ -806,7 +1217,7 @@ export default function RfqPage() {
     if (!projectId || !selectedProject) {
       toast({
         title: "Error",
-        description: "请先选择项目",
+        description: "Please select a project first",
         variant: "destructive",
       });
       return;
@@ -824,7 +1235,7 @@ export default function RfqPage() {
       });
       
       if (!response.ok) {
-        throw new Error('下载文件失败');
+        throw new Error('File download failed');
       }
       
       // 获取文件名
@@ -895,7 +1306,7 @@ export default function RfqPage() {
       
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.detail || '删除部件失败');
+        throw new Error(errorData.detail || 'Delete parts failed');
       }
       
       const result = await response.json();
@@ -910,9 +1321,9 @@ export default function RfqPage() {
       setIsDeleteDialogOpen(false);
       
       // 显示成功消息
-      sonnerToast.success(`成功删除 ${result.deleted_count} 个部件`);
+      sonnerToast.success(`Successfully deleted ${result.deleted_count} parts`);
     } catch (error) {
-      sonnerToast.error(`删除部件失败: ${error instanceof Error ? error.message : '未知错误'}`);
+      sonnerToast.error(`Delete parts failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
@@ -935,10 +1346,8 @@ export default function RfqPage() {
             <p className="text-sm text-muted-foreground">
               Create a project first before adding RFQ files
             </p>
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/dashboard/projects">
-                Create Project
-              </Link>
+            <Button onClick={() => setCreateProjectDialogOpen(true)}>
+              <PlusCircle className="mr-2 h-4 w-4" /> Create Project
             </Button>
           </div>
         </div>
@@ -947,26 +1356,71 @@ export default function RfqPage() {
 
     return (
       <>
+        {/* 顶部导航区域 */}
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold">项目列表</h2>
-          <div className="flex items-center space-x-2">
-            {projectId && (
-              <div className="text-sm text-muted-foreground">
-                当前全局项目ID: {projectId.substring(0, 8)}...
-              </div>
-            )}
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/dashboard/projects">
-                管理项目
-              </Link>
-            </Button>
+          <h2 className="text-xl font-semibold">Projects</h2>
+          <Button onClick={() => setCreateProjectDialogOpen(true)}>
+            <PlusCircle className="mr-2 h-4 w-4" /> New Project
+          </Button>
+        </div>
+        
+        {/* 搜索和筛选区域 */}
+        <div className="flex items-center gap-4 mb-4 w-full">
+          <div className="relative flex-1">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search projects..."
+              value={projectSearchTerm}
+              onChange={handleProjectSearch}
+              className="pl-9"
+            />
           </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" className="flex gap-2">
+                <Filter className="h-4 w-4" /> 
+                {projectFilterStatus ? `Status: ${projectFilterStatus}` : 'Filter'}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem onClick={() => setProjectFilterStatus(null)}>
+                All Statuses
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setProjectFilterStatus('open')}>
+                <div className="h-2 w-2 rounded-full bg-green-500 mr-2"></div>
+                Open
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setProjectFilterStatus('closed')}>
+                <div className="h-2 w-2 rounded-full bg-red-500 mr-2"></div>
+                Closed
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setProjectFilterStatus('draft')}>
+                <div className="h-2 w-2 rounded-full bg-yellow-500 mr-2"></div>
+                Draft
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setProjectFilterStatus('archived')}>
+                <div className="h-2 w-2 rounded-full bg-gray-500 mr-2"></div>
+                Archived
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
+        {/* 项目表格 */}
         <div className="rounded-md border">
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-12">
+                  <div className="flex items-center" onClick={() => toggleSelectAllProjects(!allProjectsSelected)}>
+                    {allProjectsSelected ? (
+                      <CheckSquare className="h-5 w-5 text-primary cursor-pointer" />
+                    ) : (
+                      <Square className="h-5 w-5 text-muted-foreground cursor-pointer" />
+                    )}
+                  </div>
+                </TableHead>
                 <TableHead>Project Name</TableHead>
                 <TableHead>Description</TableHead>
                 <TableHead>Status</TableHead>
@@ -975,20 +1429,33 @@ export default function RfqPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {projects.length > 0 ? (
-                projects.map((project) => (
+              {filteredProjects.length > 0 ? (
+                filteredProjects.map((project) => (
                   <TableRow key={project.id}>
+                    <TableCell>
+                      <div className="flex items-center" onClick={(e) => {
+                        e.stopPropagation();
+                        toggleProjectSelection(project.id, !projectsSelected.includes(project.id));
+                      }}>
+                        {projectsSelected.includes(project.id) ? (
+                          <CheckSquare className="h-5 w-5 text-primary cursor-pointer" />
+                        ) : (
+                          <Square className="h-5 w-5 text-muted-foreground cursor-pointer" />
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell className="font-medium">{project.name}</TableCell>
                     <TableCell>{project.description || '-'}</TableCell>
                     <TableCell>
-                      <span className={`inline-block px-2 py-0.5 text-xs rounded-full font-medium ${
-                        project.status === 'open' ? 'bg-green-100 text-green-800' :
-                        project.status === 'closed' ? 'bg-red-100 text-red-800' :
-                        project.status === 'archived' ? 'bg-gray-100 text-gray-800' :
-                        'bg-yellow-100 text-yellow-800'
-                      }`}>
+                      <Badge
+                        variant={
+                          project.status === 'open' ? 'default' :
+                          project.status === 'closed' ? 'destructive' :
+                          project.status === 'archived' ? 'secondary' : 'outline'
+                        }
+                      >
                         {project.status ? project.status.charAt(0).toUpperCase() + project.status.slice(1) : 'Draft'}
-                      </span>
+                      </Badge>
                     </TableCell>
                     <TableCell>{format(new Date(project.created_at), 'yyyy-MM-dd')}</TableCell>
                     <TableCell>
@@ -1005,7 +1472,7 @@ export default function RfqPage() {
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center py-4 text-muted-foreground">
+                  <TableCell colSpan={6} className="text-center py-4 text-muted-foreground">
                     No projects found matching your search
                   </TableCell>
                 </TableRow>
@@ -1014,27 +1481,44 @@ export default function RfqPage() {
           </Table>
         </div>
 
-        {pagination.pages > 1 && (
-          <div className="flex items-center justify-center space-x-2 py-4">
-            <Button
-              variant="outline"
-              disabled={pagination.page <= 1 || isLoading}
-              onClick={() => setPagination(prev => ({ ...prev, page: prev.page - 1 }))}
-            >
-              Previous
-            </Button>
-            <span className="text-sm">
-              Page {pagination.page} of {pagination.pages}
-            </span>
-            <Button
-              variant="outline"
-              disabled={pagination.page >= pagination.pages || isLoading}
-              onClick={() => setPagination(prev => ({ ...prev, page: prev.page + 1 }))}
-            >
-              Next
-            </Button>
-          </div>
-        )}
+        {/* 分页及批量操作区域 */}
+        <div className="flex items-center justify-between mt-4">
+          {pagination.pages > 1 && (
+            <div className="flex items-center space-x-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={pagination.page <= 1 || isLoading}
+                onClick={() => setPagination(prev => ({ ...prev, page: prev.page - 1 }))}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-sm">
+                Page {pagination.page} of {pagination.pages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={pagination.page >= pagination.pages || isLoading}
+                onClick={() => setPagination(prev => ({ ...prev, page: prev.page + 1 }))}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+
+          {projectsSelected.length > 0 && (
+            <div className="flex items-center space-x-2">
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setShowProjectDeleteDialog(true)}
+              >
+                <Trash className="mr-2 h-4 w-4" /> Delete Selected ({projectsSelected.length})
+              </Button>
+            </div>
+          )}
+        </div>
       </>
     );
   };
@@ -1065,12 +1549,14 @@ export default function RfqPage() {
       <>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center space-x-4">
+            {/* 注释掉重复的项目选择器
             <ProjectCombobox 
               projects={projects}
               selectedProject={selectedProject}
               onSelect={selectProject}
               className="min-w-[250px]"
             />
+            */}
             <div className="flex items-center">
               <h2 className="text-xl font-semibold">
                 RFQ Files
@@ -1192,12 +1678,14 @@ export default function RfqPage() {
       <>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center space-x-4">
+            {/* 注释掉重复的项目选择器
             <ProjectCombobox 
               projects={projects}
               selectedProject={selectedProject}
               onSelect={selectProject}
               className="min-w-[250px]"
             />
+            */}
             <div className="flex items-center">
               <h2 className="text-xl font-semibold">
                 Parts List
@@ -1281,6 +1769,13 @@ export default function RfqPage() {
                     <TableHead>材料</TableHead>
                     <TableHead>工艺</TableHead>
                     <TableHead>交期</TableHead>
+                    <TableHead>单位</TableHead>
+                    <TableHead>公差</TableHead>
+                    <TableHead>图号</TableHead>
+                    <TableHead>表面处理</TableHead>
+                    <TableHead>备注</TableHead>
+                    {/* 添加操作列标题 */}
+                    <TableHead>操作</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1301,6 +1796,26 @@ export default function RfqPage() {
                       <TableCell>{item.material || '-'}</TableCell>
                       <TableCell>{item.process || '-'}</TableCell>
                       <TableCell>{item.delivery_time || '-'}</TableCell>
+                      <TableCell>{item.unit || '-'}</TableCell>
+                      <TableCell>{item.tolerance || '-'}</TableCell>
+                      <TableCell>{item.drawing_url || '-'}</TableCell>
+                      <TableCell>{item.surface_finish || '-'}</TableCell>
+                      <TableCell>{item.remarks || '-'}</TableCell>
+                      {/* 添加操作列 */}
+                      <TableCell>
+                        {!isEditMode && (
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            onClick={() => openEditDialog(item)}
+                            className="h-7 px-2"
+                            disabled={selectedProject?.status === 'archived'}
+                          >
+                            <Pencil className="h-3.5 w-3.5 mr-1" />
+                            View/Edit
+                          </Button>
+                        )}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -1720,12 +2235,14 @@ export default function RfqPage() {
       <>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center space-x-4">
+            {/* 注释掉重复的项目选择器
             <ProjectCombobox 
               projects={projects}
               selectedProject={selectedProject}
               onSelect={selectProject}
               className="min-w-[250px]"
             />
+            */}
             <div className="flex items-center">
               <h2 className="text-xl font-semibold">
                 Inquiry Emails
@@ -1950,72 +2467,6 @@ export default function RfqPage() {
     }
   };
 
-  // 直接检查供应商API端点
-  const checkSuppliersApi = async () => {
-    try {
-      const token = await getAuthToken();
-      
-      // 创建不同的请求选项，直接设置请求头
-      const requestOptions: RequestInit = {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Accept': 'application/json'
-        },
-        credentials: 'include'
-      };
-      
-      // 如果有组织ID，添加到请求头
-      if (organizationId) {
-        requestOptions.headers = {
-          ...requestOptions.headers,
-          'X-Org-Id': organizationId
-        };
-      }
-      
-      console.log("API检查 - 请求选项:", requestOptions);
-      
-      // 发送请求
-      const response = await fetch(`${API_BASE_URL}/suppliers`, requestOptions);
-      console.log("API检查 - 响应状态:", response.status, response.statusText);
-      
-      if (!response.ok) {
-        throw new Error(`获取供应商失败: ${response.status} ${response.statusText}`);
-      }
-      
-      // 获取响应内容
-      const contentType = response.headers.get('content-type');
-      console.log("API检查 - 内容类型:", contentType);
-      
-      if (contentType && contentType.includes('application/json')) {
-        const rawData = await response.json();
-        console.log("API检查 - 响应数据:", rawData);
-        
-        // 显示结果
-        toast({
-          title: "API检查结果",
-          description: `成功获取供应商数据，类型: ${typeof rawData}，详情请查看控制台。`,
-          variant: "default",
-        });
-      } else {
-        const text = await response.text();
-        console.log("API检查 - 响应文本:", text);
-        toast({
-          title: "API检查结果",
-          description: `响应不是JSON格式，详情请查看控制台。`,
-          variant: "destructive",
-        });
-      }
-    } catch (error) {
-      console.error("API检查 - 错误:", error);
-      toast({
-        title: "API检查失败",
-        description: error instanceof Error ? error.message : '未知错误',
-        variant: "destructive",
-      });
-    }
-  };
-
   // 在RfqPage函数中添加这两个处理函数
   const handleReplyEmail = (email: EmailHistory) => {
     setEmailForm(prev => ({
@@ -2066,6 +2517,277 @@ export default function RfqPage() {
       }
     }
   }, [projectId]);
+
+  // 处理项目搜索
+  const handleProjectSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setProjectSearchTerm(e.target.value);
+  };
+
+  // 过滤项目
+  const filteredProjects = projects.filter(project => {
+    // 搜索条件过滤
+    const matchesSearch = project.name.toLowerCase().includes(projectSearchTerm.toLowerCase()) || 
+                         (project.description && project.description.toLowerCase().includes(projectSearchTerm.toLowerCase()));
+    
+    // 状态过滤
+    const matchesStatus = !projectFilterStatus || project.status === projectFilterStatus;
+    
+    return matchesSearch && matchesStatus;
+  });
+
+  // 创建新项目
+  const handleCreateProject = async () => {
+    try {
+      const token = await getAuthToken();
+      
+      if (!newProjectForm.name.trim()) {
+        toast({
+          title: "Error",
+          description: "Project name is required",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      const options = createRequestOptions('POST', token, {
+        name: newProjectForm.name,
+        description: newProjectForm.description,
+        status: newProjectForm.status
+      }, organizationId);
+      
+      const response = await fetch(`${API_BASE_URL}/projects`, options);
+      
+      if (!response.ok) {
+        throw new Error('Failed to create project');
+      }
+      
+      const newProject = await response.json();
+      
+      // 更新项目列表
+      fetchProjects();
+      
+      // 重置表单并关闭对话框
+      setNewProjectForm({
+        name: '',
+        description: '',
+        status: 'draft'
+      });
+      setCreateProjectDialogOpen(false);
+      
+      toast({
+        title: "Success",
+        description: "Project created successfully",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : 'Failed to create project',
+        variant: "destructive",
+      });
+    }
+  };
+
+  // 选择/取消选择所有项目
+  const toggleSelectAllProjects = (checked: boolean) => {
+    setAllProjectsSelected(checked);
+    
+    if (checked) {
+      // 选择所有过滤后的项目
+      setProjectsSelected(filteredProjects.map(p => p.id));
+    } else {
+      // 取消选择所有项目
+      setProjectsSelected([]);
+    }
+  };
+  
+  // 选择/取消选择单个项目
+  const toggleProjectSelection = (projectId: string, checked: boolean) => {
+    if (checked) {
+      setProjectsSelected(prev => [...prev, projectId]);
+    } else {
+      setProjectsSelected(prev => prev.filter(id => id !== projectId));
+    }
+  };
+  
+  // 批量删除项目
+  const deleteSelectedProjects = async () => {
+    try {
+      if (projectsSelected.length === 0) {
+        return;
+      }
+      
+      const token = await getAuthToken();
+      
+      // 这里模拟批量删除，实际上可能需要创建一个批量删除的API端点
+      let successCount = 0;
+      let errorCount = 0;
+      
+      // 逐个删除选中的项目
+      for (const projectId of projectsSelected) {
+        const options = createRequestOptions('DELETE', token, null, organizationId);
+        
+        const response = await fetch(`${API_BASE_URL}/projects/${projectId}`, options);
+        
+        if (response.ok) {
+          successCount++;
+        } else {
+          errorCount++;
+        }
+      }
+      
+      // 刷新项目列表
+      fetchProjects();
+      
+      // 重置选择状态
+      setProjectsSelected([]);
+      setAllProjectsSelected(false);
+      setShowProjectDeleteDialog(false);
+      
+      if (errorCount > 0) {
+        toast({
+          title: "Partial Success",
+          description: `Deleted ${successCount} projects, failed to delete ${errorCount} projects`,
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Success",
+          description: `Successfully deleted ${successCount} projects`,
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : 'Failed to delete projects',
+        variant: "destructive",
+      });
+    }
+  };
+  
+  // 处理表单输入变化
+  // const handleEditInputChange = (field: keyof RfqItem, value: string | number | null) => {
+  //   setEditFormData(prev => ({
+  //     ...prev,
+  //     [field]: value
+  //   }));
+  // };
+  
+  // 开始编辑
+  // const startEditing = (item: RfqItem) => {
+  //   setEditingItem(item.id);
+  //   setEditFormData({
+  //     index_no: item.index_no,
+  //     part_number: item.part_number,
+  //     name: item.name,
+  //     quantity: item.quantity,
+  //     material: item.material,
+  //     size: item.size,
+  //     process: item.process,
+  //     delivery_time: item.delivery_time,
+  //     unit: item.unit,
+  //     tolerance: item.tolerance,
+  //     drawing_url: item.drawing_url,
+  //     surface_finish: item.surface_finish,
+  //     remarks: item.remarks
+  //   });
+  // };
+  
+  // 取消编辑
+  // const cancelEditing = () => {
+  //   setEditingItem(null);
+  //   setEditFormData({});
+  // };
+
+  // 打开编辑弹窗
+  const openEditDialog = (item: RfqItem) => {
+    setItemToEdit({...item});
+    setEditDialogOpen(true);
+  };
+  
+  // 关闭编辑弹窗
+  const closeEditDialog = () => {
+    setEditDialogOpen(false);
+    setItemToEdit(null);
+  };
+  
+  // 处理编辑表单字段变化
+  // const handleEditChange = (field: keyof RfqItem, value: string | number | null) => {
+  //   if (itemToEdit) {
+  //     setItemToEdit({
+  //       ...itemToEdit,
+  //       [field]: value
+  //     });
+  //   }
+  // };
+  
+  // 保存编辑 - 重命名函数
+  const handleSaveEdit = async (updatedItem: RfqItem) => {
+    try {
+      setIsUpdating(true);
+      const token = await getAuthToken();
+      if (!token) {
+        throw new Error("认证失败");
+      }
+      
+      // 确保有项目ID
+      if (!selectedProject || !selectedProject.id) {
+        throw new Error("未选择项目或项目ID无效");
+      }
+      
+      // 创建请求数据，排除不需要更新的字段
+      const updateData = {
+        index_no: updatedItem.index_no,
+        part_number: updatedItem.part_number,
+        name: updatedItem.name,
+        quantity: updatedItem.quantity,
+        material: updatedItem.material,
+        size: updatedItem.size,
+        process: updatedItem.process,
+        delivery_time: updatedItem.delivery_time,
+        unit: updatedItem.unit,
+        tolerance: updatedItem.tolerance,
+        drawing_url: updatedItem.drawing_url,
+        surface_finish: updatedItem.surface_finish,
+        remarks: updatedItem.remarks
+      };
+      
+      // 创建请求选项
+      const options = createRequestOptions('PATCH', token, updateData);
+      
+      // 发送更新请求 - 修改API路径，包含项目ID
+      const response = await fetch(`${API_BASE_URL}/projects/rfq-items/${updatedItem.id}`, options);
+      
+      if (!response.ok) {
+        throw new Error(`更新失败: ${response.status}`);
+      }
+      
+      // 获取更新后的数据
+      const responseData = await response.json();
+      
+      // 更新本地数据
+      setRfqItems(rfqItems.map(item => 
+        item.id === updatedItem.id ? { ...item, ...responseData } : item
+      ));
+      
+      // 显示成功通知
+      toast({
+        title: "更新成功",
+        description: "零件信息已更新",
+      });
+      
+      // 关闭弹窗
+      closeEditDialog();
+    } catch (error) {
+      console.error('更新零件信息失败:', error);
+      toast({
+        variant: "destructive",
+        title: "更新失败",
+        description: error instanceof Error ? error.message : "更新零件信息时出错",
+      });
+    } finally {
+      setIsUpdating(false);
+    }
+  };
 
   return (
     <div className="container mx-auto py-6">
@@ -2612,6 +3334,92 @@ export default function RfqPage() {
           )}
         </DialogContent>
       </Dialog>
+      
+      {/* 创建项目对话框 */}
+      <Dialog open={createProjectDialogOpen} onOpenChange={setCreateProjectDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create New Project</DialogTitle>
+            <DialogDescription>
+              Fill in the details to create a new project
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="name">Project Name</Label>
+              <Input
+                id="name"
+                placeholder="Enter project name"
+                value={newProjectForm.name}
+                onChange={(e) => setNewProjectForm(prev => ({ ...prev, name: e.target.value }))}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="description">Description</Label>
+              <Textarea
+                id="description"
+                placeholder="Enter project description"
+                value={newProjectForm.description}
+                onChange={(e) => setNewProjectForm(prev => ({ ...prev, description: e.target.value }))}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="status">Status</Label>
+              <Select 
+                value={newProjectForm.status}
+                onValueChange={(value) => setNewProjectForm(prev => ({ ...prev, status: value }))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="draft">Draft</SelectItem>
+                  <SelectItem value="open">Open</SelectItem>
+                  <SelectItem value="closed">Closed</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateProjectDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateProject}>Create Project</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      {/* 删除项目确认对话框 */}
+      <AlertDialog open={showProjectDeleteDialog} onOpenChange={setShowProjectDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Selected Projects</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete {projectsSelected.length} projects? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={deleteSelectedProjects}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      
+      {/* 添加编辑弹窗 */}
+      <PartEditDialog
+        open={editDialogOpen}
+        onOpenChange={(open) => {
+          setEditDialogOpen(open);
+          if (!open) {
+            setItemToEdit(null);
+          }
+        }}
+        item={itemToEdit}
+        onSave={handleSaveEdit}
+        isSaving={isUpdating}
+      />
     </div>
   );
 } 

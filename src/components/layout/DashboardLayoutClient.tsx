@@ -98,10 +98,12 @@ export default function DashboardLayoutClient(props: { children: React.ReactNode
                 href: '/dashboard',
                 label: t('home'),
               },
+              /* 注释掉Projects菜单，统一在RFQ中管理
               {
                 href: '/dashboard/projects',
                 label: 'Projects',
               },
+              */
               {
                 href: '/dashboard/rfq',
                 label: 'RFQs',
